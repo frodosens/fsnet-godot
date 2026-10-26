@@ -1,0 +1,11 @@
+config_version=5
+
+[application]
+config/name="fsnet Godot SDK"
+run/main_scene="res://examples/gdscript/main.tscn"
+
+[autoload]
+Fsnet="*res://addons/fsnet/fsnet.gd"
+
+[rendering]
+renderer/rendering_method="gl_compatibility"

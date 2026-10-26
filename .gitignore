@@ -23,3 +23,23 @@ mono_crash.*.json
 *.exe
 # Uncomment if your project does not version PCK files as runtime dependencies.
 # *.pck
+/.dev/
+/.godot/
+/build*/
+/dist/
+/addons/fsnet/bin/*
+!/addons/fsnet/bin/.gitkeep
+**/bin/
+**/obj/
+__pycache__/
+*.py[cod]
+*.user
+*.log
+*.so
+*.dll
+*.dylib
+*.zip
+*.tar.gz
+!/addons/fsnet/bin/
+/addons/fsnet/bin/*
+!/addons/fsnet/bin/.gitkeep

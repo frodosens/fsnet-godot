@@ -1,0 +1,12 @@
+config_version=5
+
+[application]
+config/name="fsnet Godot C# SDK example"
+run/main_scene="res://Main.tscn"
+config/features=PackedStringArray("4.6", "C#", "GL Compatibility")
+
+[dotnet]
+project/assembly_name="FsnetGodotDemo"
+
+[rendering]
+renderer/rendering_method="gl_compatibility"

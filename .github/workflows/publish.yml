@@ -1,0 +1,111 @@
+name: Publish validated plugin
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: Successful Desktop plugin workflow run ID
+        required: true
+      source_revision:
+        description: Exact plugin commit validated by that run
+        required: true
+      version:
+        description: Release version without v prefix
+        required: true
+        default: '0.1.0'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-plugin-${{ inputs.version }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_VERSION: ${{ inputs.version }}
+      VALIDATION_RUN: ${{ inputs.run_id }}
+      SOURCE_REVISION: ${{ inputs.source_revision }}
+    steps:
+      - name: Validate immutable source and successful build run
+        run: |
+          python3 - <<'PY'
+          import json, os, re, subprocess
+          revision=os.environ['SOURCE_REVISION']
+          version=os.environ['RELEASE_VERSION']
+          run_id=os.environ['VALIDATION_RUN']
+          repository=os.environ['GITHUB_REPOSITORY']
+          if not re.fullmatch('[0-9a-f]{40}',revision):
+              raise SystemExit('source_revision must be an exact full commit')
+          if not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+(?:[-.][A-Za-z0-9]+)*',version):
+              raise SystemExit('invalid semantic release version')
+          if not re.fullmatch('[0-9]+',run_id):
+              raise SystemExit('run_id must be numeric')
+          run=json.loads(subprocess.check_output(['gh','api',f'repos/{repository}/actions/runs/{run_id}'],text=True))
+          if (run.get('status')!='completed' or run.get('conclusion')!='success'
+                  or run.get('head_sha')!=revision or run.get('name')!='Desktop plugin'
+                  or run.get('path')!='.github/workflows/plugin.yml'
+                  or run.get('event') not in ('push','workflow_dispatch')
+                  or run.get('head_repository',{}).get('full_name')!=repository):
+              raise SystemExit('selected run is not a successful Desktop plugin build of this repository and exact source')
+          tag='v'+version
+          for endpoint in (f'repos/{repository}/releases/tags/{tag}',f'repos/{repository}/git/ref/tags/{tag}'):
+              result=subprocess.run(['gh','api',endpoint],capture_output=True,text=True)
+              if result.returncode==0:
+                  raise SystemExit('tag/release already exists; refusing to overwrite')
+              if 'HTTP 404' not in result.stderr:
+                  raise SystemExit('cannot confirm tag/release absence; refusing to publish')
+          print('Validated completed four-target build provenance and unused release tag.')
+          PY
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_revision }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Download validated target artifacts inside GitHub Actions
+        uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.run_id }}
+          pattern: fsnet-godot-*
+          path: .dev/release-artifacts
+      - name: Verify all eight packages and matching source revisions
+        run: |
+          python3 tools/collect_release.py --artifacts .dev/release-artifacts \
+            --version "$RELEASE_VERSION" --output-dir .dev/release
+          python3 - <<'PY'
+          import json,os,pathlib
+          path=pathlib.Path('.dev/release/release-manifest.json')
+          manifest=json.loads(path.read_text())
+          if manifest['source_revision']!=os.environ['SOURCE_REVISION'] or len(manifest['packages'])!=8:
+              raise SystemExit('collected assets do not match requested validated source')
+          manifest['validation_run_id']=int(os.environ['VALIDATION_RUN'])
+          manifest['validation_run_url']=f"https://github.com/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{os.environ['VALIDATION_RUN']}"
+          path.write_text(json.dumps(manifest,indent=2)+'\n')
+          notes=pathlib.Path('.dev/release-notes.md')
+          notes.write_text(f"Godot 4.6.3 desktop client plugin.\n\n"
+              f"- GDScript and .NET packages share the native fsnet SDK implementation.\n"
+              f"- Linux x86_64, Windows x86_64, macOS x86_64 and macOS arm64.\n"
+              f"- Each archive passed network integration and fresh-project packaged-consumer checks.\n"
+              f"- Source: `{manifest['source_revision']}`. SDK source: `{manifest['sdk_source_revision']}`.\n"
+              f"- Validation: {manifest['validation_run_url']}\n\n"
+              f"Extract the matching ZIP into a Godot project; binaries, dependencies and notices are included. "
+              f".NET requires Godot .NET and .NET 8 SDK for C# projects.\n")
+          PY
+      - name: Create draft, upload complete assets, then publish
+        run: |
+          tag="v$RELEASE_VERSION"
+          gh release create "$tag" --repo "$GITHUB_REPOSITORY" --target "$SOURCE_REVISION" \
+            --title "fsnet Godot $tag" --notes-file .dev/release-notes.md --draft
+          gh release upload "$tag" --repo "$GITHUB_REPOSITORY" \
+            .dev/release/*.zip .dev/release/SHA256SUMS .dev/release/release-manifest.json
+          gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --draft=false --latest

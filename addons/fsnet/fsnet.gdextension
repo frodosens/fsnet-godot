@@ -1,0 +1,20 @@
+[configuration]
+entry_symbol = "fsnet_library_init"
+compatibility_minimum = "4.6"
+reloadable = false
+
+[libraries]
+linux.debug.x86_64 = "res://addons/fsnet/bin/libfsnet_godot.linux.x86_64.so"
+linux.release.x86_64 = "res://addons/fsnet/bin/libfsnet_godot.linux.x86_64.so"
+windows.debug.x86_64 = "res://addons/fsnet/bin/fsnet_godot.windows.x86_64.dll"
+windows.release.x86_64 = "res://addons/fsnet/bin/fsnet_godot.windows.x86_64.dll"
+macos.debug.x86_64 = "res://addons/fsnet/bin/libfsnet_godot.macos.x86_64.dylib"
+macos.release.x86_64 = "res://addons/fsnet/bin/libfsnet_godot.macos.x86_64.dylib"
+macos.debug.arm64 = "res://addons/fsnet/bin/libfsnet_godot.macos.arm64.dylib"
+macos.release.arm64 = "res://addons/fsnet/bin/libfsnet_godot.macos.arm64.dylib"
+
+[dependencies]
+linux.x86_64 = {"res://addons/fsnet/bin/libfsnet.so": ""}
+windows.x86_64 = {"res://addons/fsnet/bin/fsnet.dll": "", "res://addons/fsnet/bin/libstdc++-6.dll": "", "res://addons/fsnet/bin/libgcc_s_seh-1.dll": "", "res://addons/fsnet/bin/libwinpthread-1.dll": ""}
+macos.x86_64 = {"res://addons/fsnet/bin/libfsnet.dylib": ""}
+macos.arm64 = {"res://addons/fsnet/bin/libfsnet.dylib": ""}

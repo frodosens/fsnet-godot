@@ -1,0 +1,152 @@
+name: Desktop plugin
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Plugin package version
+        default: '0.1.0'
+        required: true
+      sdk_tag:
+        description: Precompiled SDK release tag in frodosens/fsnet
+        default: sdk-v0.3.1
+        required: true
+      sdk_revision:
+        description: Optional exact SDK source commit
+        required: false
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'addons/**'
+      - 'tests/**'
+      - 'tools/**'
+      - 'CMakeLists.txt'
+      - 'build_profile.json'
+      - 'project.godot'
+      - '.github/workflows/plugin.yml'
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-plugin-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test-package:
+    name: ${{ matrix.platform }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {platform: linux-x86_64, runner: ubuntu-22.04, shell: bash}
+          - {platform: windows-x86_64, runner: windows-2022, shell: 'msys2 {0}'}
+          - {platform: macos-x86_64, runner: macos-15-intel, shell: bash}
+          - {platform: macos-arm64, runner: macos-15, shell: bash}
+    defaults:
+      run:
+        shell: ${{ matrix.shell }}
+    env:
+      PLUGIN_VERSION: ${{ inputs.version || '0.1.0' }}
+      SDK_TAG: ${{ inputs.sdk_tag || 'sdk-v0.3.1' }}
+      SDK_REVISION: ${{ inputs.sdk_revision }}
+      GODOT_VERSION: '4.6.3'
+      GODOT_SILENCE_ROOT_WARNING: '1'
+      DOTNET_NOLOGO: '1'
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        if: runner.os != 'Windows'
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - uses: msys2/setup-msys2@v2
+        if: runner.os == 'Windows'
+        with:
+          msystem: MINGW64
+          path-type: inherit
+          update: true
+          install: >-
+            git make perl
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-ninja
+            mingw-w64-x86_64-python
+      - name: Archive tooling regression checks
+        run: python3 -m unittest discover -s tests -p test_packaging.py -v
+      - name: Fetch verified precompiled SDK
+        run: |
+          extra=()
+          if [ -n "$SDK_REVISION" ]; then extra+=(--expected-revision "$SDK_REVISION"); fi
+          python3 tools/fetch_sdk.py --repository frodosens/fsnet --version 0.3.1 \
+            --tag "$SDK_TAG" --platform '${{ matrix.platform }}' --prefix .dev/sdk "${extra[@]}"
+      - name: Configure using the installed SDK only
+        run: |
+          sdk_prefix="$(python3 -c 'from pathlib import Path; print(Path(".dev/sdk").resolve().as_posix())')"
+          cmake -S . -B .dev/build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH="$sdk_prefix"
+      - name: Build native adapter and public-SDK fixture
+        run: cmake --build .dev/build --parallel 2
+      - name: Stage all SDK runtime dependencies
+        run: |
+          python3 - <<'PY'
+          import json, pathlib, shutil, sys
+          sys.path.insert(0, 'tools')
+          from package import sdk_runtime_paths
+          sdk=pathlib.Path('.dev/sdk')
+          destination=pathlib.Path('addons/fsnet/bin')
+          for path in sdk_runtime_paths(json.loads((sdk/'manifest.json').read_text())):
+              shutil.copy2(sdk.joinpath(*path.parts), destination/path.name)
+          PY
+      - name: Fetch checksum-verified standard and .NET Godot
+        run: |
+          python3 tools/fetch_godot.py --version "$GODOT_VERSION" --platform '${{ matrix.platform }}' \
+            --prefix .dev/godot --output .dev/godot-tools.json
+      - name: Run real Godot integrations and package verified binaries
+        run: |
+          python3 - <<'PY'
+          import json, os, pathlib, subprocess, sys
+          root=pathlib.Path.cwd()
+          tools=json.loads((root/'.dev/godot-tools.json').read_text())
+          platform='${{ matrix.platform }}'
+          server=root/'.dev/build'/('fsnet-godot-test-server.exe' if os.name=='nt' else 'fsnet-godot-test-server')
+          report=root/'.dev/integration-report.json'
+          subprocess.run([sys.executable,'tools/run_integration.py',
+              '--godot',tools['godot'],'--mono-godot',tools['mono_godot'],
+              '--server',str(server),'--platform',platform,'--report',str(report)],check=True)
+          subprocess.run([sys.executable,'tools/package.py','--platform',platform,
+              '--sdk-prefix','.dev/sdk','--bindings-dir','.dev/build/_deps/godot-cpp-src',
+              '--validation',str(report),'--version',os.environ['PLUGIN_VERSION'],'--output-dir','dist'],check=True)
+          subprocess.run([sys.executable,'tools/verify_package.py',
+              '--godot',tools['godot'],'--mono-godot',tools['mono_godot'],
+              '--godot-nuget-source',tools['godot_nuget_source'],'--godot-version',os.environ['GODOT_VERSION'],
+              '--archives',*[str(path) for path in sorted((root/'dist').glob('*.zip'))],
+              '--report','dist/package-verification.json'],check=True)
+          PY
+      - name: Upload validated target packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: fsnet-godot-${{ matrix.platform }}
+          path: dist/
+          if-no-files-found: error
+          retention-days: 30
+      - name: Preserve validation diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: validation-${{ matrix.platform }}
+          path: |
+            .dev/integration-report.json
+            .dev/godot-tools.json
+            .dev/integration-logs/*.log
+          if-no-files-found: ignore
+          retention-days: 14
