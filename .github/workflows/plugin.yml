@@ -24,6 +24,7 @@ on:
       - 'CMakeLists.txt'
       - 'build_profile.json'
       - 'project.godot'
+      - '.gitattributes'
       - '.github/workflows/plugin.yml'
   pull_request:
 
@@ -122,6 +123,9 @@ jobs:
           platform='${{ matrix.platform }}'
           server=root/'.dev/build'/('fsnet-godot-test-server.exe' if os.name=='nt' else 'fsnet-godot-test-server')
           report=root/'.dev/integration-report.json'
+          source_status=root/'.dev/source-status.txt'
+          source_status.write_text(subprocess.check_output(['git','status','--porcelain',
+              '--untracked-files=all'],text=True))
           subprocess.run([sys.executable,'tools/run_integration.py',
               '--godot',tools['godot'],'--mono-godot',tools['mono_godot'],
               '--server',str(server),'--platform',platform,'--report',str(report)],check=True)
@@ -150,5 +154,6 @@ jobs:
             .dev/integration-report.json
             .dev/godot-tools.json
             .dev/integration-logs/*.log
+            .dev/source-status.txt
           if-no-files-found: ignore
           retention-days: 14

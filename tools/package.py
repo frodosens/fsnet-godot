@@ -123,9 +123,10 @@ def package(root, addon, sdk, bindings, validation_path, output, version, platfo
     if sdk_manifest.get("platform") != platform or not re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", sdk_manifest.get("source_revision", "")):
         raise ValueError("SDK manifest must match platform and identify its source revision")
     revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip()
-    dirty = bool(subprocess.check_output(["git", "status", "--porcelain", "--untracked-files=all"], cwd=root, text=True).strip())
+    source_status = subprocess.check_output(["git", "status", "--porcelain", "--untracked-files=all"], cwd=root, text=True).strip()
+    dirty = bool(source_status)
     if dirty:
-        raise ValueError("commit reviewed sources before producing release packages")
+        raise ValueError("commit reviewed sources before producing release packages:\n" + source_status)
     if validation.get("source_revision") not in (None, revision):
         raise ValueError("validation report belongs to another plugin source revision")
     if validation.get("sdk_source_revision") not in (None, sdk_manifest["source_revision"]):
