@@ -13,6 +13,7 @@ import xml.sax.saxutils
 import zipfile
 
 from fetch_sdk import safe_unpack
+from run_integration import EDITOR_ANDROID_SHUTDOWN
 
 
 GDSCRIPT = '''extends SceneTree
@@ -63,9 +64,11 @@ public partial class PackagedSmoke : Node
 
 def run(command, folder, env, timeout=60):
     result = subprocess.run(command, cwd=folder, env=env, capture_output=True, text=True, timeout=timeout)
-    if result.returncode != 0 or "SCRIPT ERROR:" in result.stdout + result.stderr:
+    output = result.stdout + result.stderr
+    checked = EDITOR_ANDROID_SHUTDOWN.sub("", output) if "--editor" in command else output
+    if result.returncode != 0 or "ERROR:" in checked:
         raise RuntimeError("packaged addon check failed:\n" + result.stdout + result.stderr)
-    return result.stdout + result.stderr
+    return output
 
 
 def consumer_environment(root, dotnet=None, platform=None):

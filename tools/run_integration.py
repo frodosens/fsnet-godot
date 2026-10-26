@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import queue
+import re
 import secrets
 import shutil
 import subprocess
@@ -15,6 +16,9 @@ import threading
 import time
 
 ROOT = Path(__file__).resolve().parents[1]
+EDITOR_ANDROID_SHUTDOWN = re.compile(
+    r'(?m)^ERROR: EditorSettings not instantiated yet when getting setting "export/android/android_sdk_path"\.\n'
+    r'\s+at: _EDITOR_GET \(editor/settings/editor_settings\.cpp:\d+\)\n?')
 
 
 def run(command, cwd, env, log, timeout=120):
@@ -28,7 +32,11 @@ def run(command, cwd, env, log, timeout=120):
         raise
     output = result.stdout + result.stderr
     log.write_text(output)
-    if result.returncode or "ERROR:" in output:
+    # This official 4.6.3 editor diagnostic occurs when Android export polling
+    # reads settings during shutdown. Keep the raw log and allow only this
+    # exact engine location on a successful editor invocation, never game runs.
+    checked = EDITOR_ANDROID_SHUTDOWN.sub("", output) if "--editor" in command else output
+    if result.returncode or "ERROR:" in checked:
         raise RuntimeError(f"Command failed ({result.returncode}): {command[0]}\n{log.read_text()[-12000:]}")
     return output
 
@@ -69,7 +77,8 @@ def main():
             parser.error(f"Missing executable: {path}")
     outcomes = []
     state = {"status": "failed", "platform": args.platform, "gdscript": False, "dotnet": False,
-             "collected_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(), "results": outcomes}
+             "collected_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(), "results": outcomes,
+             "editor_diagnostics": []}
     state["source_revision"] = subprocess.check_output(
         ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
     sdk_manifest = ROOT / ".dev/sdk/manifest.json"
@@ -108,8 +117,10 @@ def main():
             # Godot 4.6.3 --import auto-quit can tear down EditorHelp before its
             # deferred extension docs callback. Give the fresh editor a bounded
             # main loop so the callback runs before shutdown; never retry a crash.
-            run([godot, "--headless", "--editor", "--path", standard, "--quit-after", "600", "--max-fps", "60"], standard, env,
+            imported = run([godot, "--headless", "--editor", "--path", standard, "--quit-after", "600", "--max-fps", "60"], standard, env,
                 logs / "gdscript-import.log")
+            if EDITOR_ANDROID_SHUTDOWN.search(imported):
+                state["editor_diagnostics"].append({"phase": "gdscript-import", "message": "Godot Android export settings read during editor shutdown"})
             output = run([godot, "--headless", "--path", standard, "--script", "res://tests/gdscript/integration.gd"],
                          standard, env, logs / "gdscript-integration.log", timeout=75)
             if "PASS fsnet Godot GDScript integration" not in output:
@@ -136,8 +147,10 @@ def main():
                 ET.ElementTree(config).write(managed / "NuGet.Config", encoding="utf-8", xml_declaration=True)
             run([dotnet, "build", "--configuration", "Debug", "--nologo"], managed, env,
                 logs / "dotnet-build.log", timeout=120)
-            run([mono, "--headless", "--editor", "--path", managed, "--quit-after", "600", "--max-fps", "60"], managed, env,
+            imported = run([mono, "--headless", "--editor", "--path", managed, "--quit-after", "600", "--max-fps", "60"], managed, env,
                 logs / "dotnet-import.log", timeout=75)
+            if EDITOR_ANDROID_SHUTDOWN.search(imported):
+                state["editor_diagnostics"].append({"phase": "dotnet-import", "message": "Godot Android export settings read during editor shutdown"})
             for case in ("smoke", "integration"):
                 output = run([mono, "--headless", "--path", managed, "--", "--" + case], managed, env,
                              logs / ("dotnet-" + case + ".log"), timeout=60)

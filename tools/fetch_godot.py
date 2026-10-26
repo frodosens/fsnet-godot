@@ -47,8 +47,9 @@ def verified_unpack(archive, destination, checksums):
         names, total = set(), 0
         links = []
         for member in package.infolist():
-            path = PurePosixPath(member.filename)
-            if (path.is_absolute() or "\\" in member.filename or "\0" in member.filename
+            name = member.orig_filename
+            path = PurePosixPath(name)
+            if (not name or path.is_absolute() or "\\" in name or "\0" in name
                     or any(part in ("", ".", "..") or ":" in part for part in path.parts)):
                 raise ValueError("unsafe Godot archive path")
             normalized = path.as_posix().rstrip("/").casefold()

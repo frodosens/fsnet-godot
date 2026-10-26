@@ -41,14 +41,18 @@ class SDKArchiveTests(unittest.TestCase):
                 fetch.checksum_from_file(path, "sdk.zip")
 
     def test_traversal_duplicate_and_symlink_are_rejected_before_extracting(self):
-        fixtures = ["../escape", "/absolute", "C:/windows", "folder\\escape"]
+        fixtures = ["../escape", "/absolute", "C:/windows", "folder\\escape", "null\0suffix"]
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
             for index, name in enumerate(fixtures):
                 archive = root / f"unsafe-{index}.zip"
                 with zipfile.ZipFile(archive, "w") as stream:
                     stream.writestr("safe.txt", "safe")
-                    stream.writestr(name, "unsafe")
+                    # Preserve the actual ZIP member name even on Windows,
+                    # where ZipInfo's constructor normalizes backslashes.
+                    entry = zipfile.ZipInfo()
+                    entry.filename = entry.orig_filename = name
+                    stream.writestr(entry, "unsafe")
                 target = root / f"out-{index}"
                 with self.assertRaises(ValueError):
                     fetch.safe_unpack(archive, target)

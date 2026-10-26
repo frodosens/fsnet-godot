@@ -72,9 +72,18 @@ public partial class Main : Node
         Check(!result.IsSuccess, "disconnected invalid call unexpectedly succeeded");
         using (var cancellation = new CancellationTokenSource())
         {
-            var request = _client.RpcAsync("0000000000000001", "echo", cancellationToken: cancellation.Token);
-            await Task.Run(cancellation.Cancel);
-            await Cancelled(request);
+            // Hold queued native completion until the worker has cancelled.
+            // Otherwise the disconnected rejection can win on the next frame.
+            _client.AutoPoll = false;
+            try
+            {
+                var request = _client.RpcAsync("0000000000000001", "echo", cancellationToken: cancellation.Token);
+                await Task.Run(cancellation.Cancel);
+                await Cancelled(request);
+                _client.Poll();
+                Check(_client.PendingRequestCount == 0, "cancelled completion leaked its ticket");
+            }
+            finally { _client.AutoPoll = true; }
         }
         var closed = _client.RpcAsync("0000000000000001", "echo");
         _client.CloseConnection();

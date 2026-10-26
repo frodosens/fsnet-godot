@@ -56,6 +56,10 @@ jobs:
                   or run.get('head_repository',{}).get('full_name')!=repository):
               raise SystemExit('selected run is not a successful Desktop plugin build of this repository and exact source')
           tag='v'+version
+          pages=json.loads(subprocess.check_output([
+              'gh','api','--paginate','--slurp',f'repos/{repository}/releases?per_page=100'],text=True))
+          if any(release.get('tag_name')==tag for page in pages for release in page):
+              raise SystemExit('tag/release already exists, including drafts; refusing to overwrite')
           for endpoint in (f'repos/{repository}/releases/tags/{tag}',f'repos/{repository}/git/ref/tags/{tag}'):
               result=subprocess.run(['gh','api',endpoint],capture_output=True,text=True)
               if result.returncode==0:
@@ -103,9 +107,70 @@ jobs:
           PY
       - name: Create draft, upload complete assets, then publish
         run: |
-          tag="v$RELEASE_VERSION"
-          gh release create "$tag" --repo "$GITHUB_REPOSITORY" --target "$SOURCE_REVISION" \
-            --title "fsnet Godot $tag" --notes-file .dev/release-notes.md --draft
-          gh release upload "$tag" --repo "$GITHUB_REPOSITORY" \
-            .dev/release/*.zip .dev/release/SHA256SUMS .dev/release/release-manifest.json
-          gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --draft=false --latest
+          python3 - <<'PY'
+          import hashlib,json,os,pathlib,subprocess,urllib.parse
+
+          repository=os.environ['GITHUB_REPOSITORY']
+          revision=os.environ['SOURCE_REVISION']
+          tag='v'+os.environ['RELEASE_VERSION']
+
+          def api(endpoint,*,method='GET',payload=None,extra=()):
+              command=['gh','api','--method',method,endpoint,*extra]
+              body=None
+              if payload is not None:
+                  command.extend(['--input','-'])
+                  body=json.dumps(payload)
+              return json.loads(subprocess.check_output(command,input=body,text=True))
+
+          # Draft releases are not reliably returned by the by-tag endpoint.
+          # Repeat the absence guard immediately before creation, including drafts.
+          pages=json.loads(subprocess.check_output(['gh','api','--paginate','--slurp',
+              f'repos/{repository}/releases?per_page=100'],text=True))
+          if any(release.get('tag_name')==tag for page in pages for release in page):
+              raise SystemExit('release already exists, including drafts; refusing to overwrite')
+          result=subprocess.run(['gh','api',f'repos/{repository}/git/ref/tags/{tag}'],
+              capture_output=True,text=True)
+          if result.returncode==0 or 'HTTP 404' not in result.stderr:
+              raise SystemExit('cannot confirm tag absence; refusing to publish')
+
+          directory=pathlib.Path('.dev/release')
+          paths=sorted(directory.glob('*.zip'))+[directory/'SHA256SUMS',directory/'release-manifest.json']
+          if len(paths)!=10 or any(not path.is_file() or path.is_symlink() for path in paths):
+              raise SystemExit('expected eight ZIPs, checksums and release manifest')
+          expected={path.name:(path.stat().st_size,'sha256:'+hashlib.sha256(path.read_bytes()).hexdigest())
+              for path in paths}
+          reference=api(f'repos/{repository}/git/refs',method='POST',
+              payload={'ref':'refs/tags/'+tag,'sha':revision})
+          if reference.get('object',{}).get('sha')!=revision:
+              raise SystemExit('new release tag does not point to the validated source')
+          release=api(f'repos/{repository}/releases',method='POST',payload={
+              'tag_name':tag,'target_commitish':revision,'name':'fsnet Godot '+tag,
+              'body':pathlib.Path('.dev/release-notes.md').read_text(),'draft':True})
+          release_id=release.get('id')
+          if type(release_id) is not int or not release.get('draft') or release.get('tag_name')!=tag:
+              raise SystemExit('release creation did not return the expected draft')
+          print(f'Created draft release ID {release_id}; publication uses its numeric ID.',flush=True)
+
+          def verify_assets(assets):
+              if len(assets)!=len(expected) or {asset.get('name') for asset in assets}!=set(expected):
+                  raise SystemExit('uploaded release asset set is incomplete or unexpected')
+              for asset in assets:
+                  size,digest=expected[asset['name']]
+                  if asset.get('state')!='uploaded' or asset.get('size')!=size or asset.get('digest')!=digest:
+                      raise SystemExit('uploaded asset size/state/digest mismatch: '+asset['name'])
+
+          for path in paths:
+              endpoint=(f'https://uploads.github.com/repos/{repository}/releases/{release_id}/assets?'
+                  +urllib.parse.urlencode({'name':path.name}))
+              api(endpoint,method='POST',extra=('--header','Content-Type: application/octet-stream',
+                  '--input',str(path)))
+          verify_assets(api(f'repos/{repository}/releases/{release_id}/assets?per_page=100'))
+          release=api(f'repos/{repository}/releases/{release_id}',method='PATCH',
+              payload={'draft':False,'make_latest':'true'})
+          if release.get('draft') is not False or release.get('tag_name')!=tag:
+              raise SystemExit('release publication did not return the expected public release')
+          verify_assets(api(f'repos/{repository}/releases/{release_id}/assets?per_page=100'))
+          if api(f'repos/{repository}/git/ref/tags/{tag}').get('object',{}).get('sha')!=revision:
+              raise SystemExit('published release tag does not match the validated source')
+          print('Published '+release['html_url'])
+          PY

@@ -67,6 +67,7 @@ python3 tools/verify_package.py --godot /path/to/standard/godot \
 
 首次编辑器导入使用 `--headless --editor --quit-after 600 --max-fps 60`，给 Godot 4.6.3 的原生类文档与资源后台扫描留出有界的完成窗口。
 工具不使用立即 `--import --quit`，因为该引擎版本在后台文档任务尚未完成时立即退出可能发生退出竞争；实际项目正常运行不需要这个退出参数。
+macOS 上该版本还可能在编辑器退出时报告 Android 导出设置读取 `export/android/android_sdk_path` 的 `_EDITOR_GET` 诊断。集成工具仅在编辑器正常退出时允许这一条精确的引擎诊断，并在 `editor_diagnostics` 中记录；游戏运行和其他 ERROR 仍判为失败。
 临时项目具有独立可写的 XDG 配置/数据/缓存目录与 .NET/NuGet 缓存；显式 `--dotnet` 同时设置该 SDK 的 `DOTNET_ROOT`，不依赖机器上的另一套 SDK。
 
 原生二进制、Godot/.NET 下载、TLS 测试私钥和本机配置不会提交；包内只允许明确的 addon 源文件、

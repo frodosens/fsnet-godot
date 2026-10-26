@@ -56,8 +56,11 @@ def safe_unpack(archive, destination):
     with zipfile.ZipFile(archive) as package:
         names, size = set(), 0
         for member in package.infolist():
-            path = PurePosixPath(member.filename)
-            if (not member.filename or "\\" in member.filename or "\0" in member.filename
+            # ZipInfo normalizes Windows separators and truncates NULs in
+            # filename. Validate the original name before that normalization.
+            name = member.orig_filename
+            path = PurePosixPath(name)
+            if (not name or "\\" in name or "\0" in name
                     or path.is_absolute() or any(part in ("", ".", "..") or ":" in part for part in path.parts)):
                 raise ValueError("unsafe SDK archive path")
             normalized = path.as_posix().rstrip("/").casefold()

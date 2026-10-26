@@ -82,7 +82,7 @@ jobs:
             mingw-w64-x86_64-ninja
             mingw-w64-x86_64-python
       - name: Archive tooling regression checks
-        run: python3 -m unittest discover -s tests -p test_packaging.py -v
+        run: python3 -m unittest discover -s tests -p 'test_*.py' -v
       - name: Fetch verified precompiled SDK
         run: |
           extra=()
