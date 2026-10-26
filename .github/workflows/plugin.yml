@@ -92,8 +92,10 @@ jobs:
       - name: Configure using the installed SDK only
         run: |
           sdk_prefix="$(python3 -c 'from pathlib import Path; print(Path(".dev/sdk").resolve().as_posix())')"
+          extra=()
+          if [ "$RUNNER_OS" = macOS ]; then extra+=(-DCMAKE_OSX_DEPLOYMENT_TARGET=13.0); fi
           cmake -S . -B .dev/build -G Ninja -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_PREFIX_PATH="$sdk_prefix"
+            -DCMAKE_PREFIX_PATH="$sdk_prefix" "${extra[@]}"
       - name: Build native adapter and public-SDK fixture
         run: cmake --build .dev/build --parallel 2
       - name: Stage all SDK runtime dependencies

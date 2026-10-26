@@ -10,10 +10,10 @@ Godot 4 的 fsnet 客户端插件。GDScript 和 C# 共用一个 GDExtension 原
 
 | 平台 | 发行包平台标识 |
 | --- | --- |
-| Windows x86_64 | `windows-x86_64` |
-| Linux x86_64 | `linux-x86_64` |
-| macOS Intel | `macos-x86_64` |
-| macOS Apple Silicon | `macos-arm64` |
+| Windows 10+ x86_64 | `windows-x86_64` |
+| Linux x86_64（glibc 2.35+） | `linux-x86_64` |
+| macOS 13+ Intel | `macos-x86_64` |
+| macOS 13+ Apple Silicon | `macos-arm64` |
 
 - **GDScript**：选择 `gdscript` 包，在 Project Settings → Plugins 启用 fsnet，插件会添加 `Fsnet` Autoload。
 - **C#**：选择 `dotnet` 包，使用 Godot .NET 和 .NET 8 SDK，将 `Fsnet.Godot.FsnetConnection` 加入场景树。.NET 包同时保留 GDScript 接口。
